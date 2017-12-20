@@ -304,27 +304,6 @@ export function getContentOfTemplate(template: vscode.SymbolInformation, documen
   return content;
 }
 
-export function scanTemplate(template: vscode.SymbolInformation, document: vscode.TextDocument) {
-  const scanner = htmlLangService.createScanner(document.getText(_createRange(template.location.range)));
-  let doScan: number = scanner.scan();
-  let content = '';
-
-  while (
-    doScan != TokenType.EOS &&
-    doScan != TokenType.EndTag &&
-    doScan != TokenType.EndTagClose &&
-    doScan != TokenType.Unknown
-  ) {
-    if (doScan == TokenType.Script) {
-      console.log(scanner.getTokenEnd());
-    }
-
-    doScan = scanner.scan();
-  }
-
-  return content;
-}
-
 function _transformTextDocumentApi(document: vscode.TextDocument) {
   // Necessary because the API is incompatible between htmlLanguage service and new vs code versions
   let transform: any = {};
@@ -338,10 +317,9 @@ function _getCurrentSymbol(
   symbols: vscode.SymbolInformation[],
   position: vscode.Position
 ): vscode.SymbolInformation | undefined {
-  const standardSymbols = _.findLast(symbols, (symbol: vscode.SymbolInformation) => {
+  return _.findLast(symbols, (symbol: vscode.SymbolInformation) => {
     return new vscode.Range(symbol.location.range.start, symbol.location.range.end).contains(position);
   });
-  return standardSymbols;
 }
 
 function _createRange(oldRangeObject: vscode.Range) {
