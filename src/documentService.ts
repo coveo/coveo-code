@@ -28,11 +28,27 @@ export function getComponentAtPosition(
   const htmlDoc = htmlLangService.parseHTMLDocument(transformedDoc);
   const symbols = _transformSymbols(<any>htmlLangService.findDocumentSymbols(transformedDoc, htmlDoc));
   const currentSymbol = _getCurrentSymbol(symbols, position);
-
   if (currentSymbol) {
     return referenceDocumentation.getDocumentation(currentSymbol);
   }
 
+  return undefined;
+}
+
+export async function getResultTemplateComponentAtPosition(
+  referenceDocumentation: ReferenceDocumentation,
+  position: vscode.Position,
+  document: vscode.TextDocument
+) {
+  const resultTemplateAtPosition = getResultTemplateAtPosition(position, document);
+  if (resultTemplateAtPosition) {
+    const { newDocument, newPosition } = await _transformDocAndPositionForResultTemplate(
+      resultTemplateAtPosition,
+      document,
+      position
+    );
+    return getComponentAtPosition(referenceDocumentation, newPosition, newDocument);
+  }
   return undefined;
 }
 
@@ -53,6 +69,38 @@ export function getResultTemplateAtPosition(
 
     if (currentTemplate) {
       return currentTemplate;
+    }
+  }
+
+  return undefined;
+}
+
+export async function getResultTemplateComponentOptionAtPosition(
+  referenceDocumentation: ReferenceDocumentation,
+  position: vscode.Position,
+  document: vscode.TextDocument
+) {
+  const resultTemplateAtPosition = getResultTemplateAtPosition(position, document);
+  const resultTemplateComponentAtPosition = await getResultTemplateComponentAtPosition(
+    referenceDocumentation,
+    position,
+    document
+  );
+  if (resultTemplateAtPosition && resultTemplateComponentAtPosition) {
+    const { newDocument, newPosition } = await _transformDocAndPositionForResultTemplate(
+      resultTemplateAtPosition,
+      document,
+      position
+    );
+    const currentActiveAttribute = _getScanOfActiveAttributeValue(newDocument, newPosition);
+
+    if (currentActiveAttribute) {
+      const optionThatMatch = _.find(
+        resultTemplateComponentAtPosition.options,
+        option => `${ReferenceDocumentation.camelCaseToHyphen(option.name)}` == currentActiveAttribute.attributeName
+      );
+
+      return optionThatMatch;
     }
   }
 
@@ -162,7 +210,7 @@ export function doCompleteScanOfSymbol(
 
   let cursorOffsetInSymbol = currentCursorOffset - currentSymbolOffset;
   const completeScanOfAttributeValues: IScanOfAttributeValue[] = [];
-  let doScan: any = scanner.scan();
+  scanner.scan();
 
   const shouldExitScan = () => {
     return (
@@ -179,10 +227,10 @@ export function doCompleteScanOfSymbol(
       let attributeValue = '';
       let activeUnderCursor = false;
 
-      doScan = scanner.scan();
+      scanner.scan();
 
       if (scanner.getTokenType() == TokenType.DelimiterAssign) {
-        doScan = scanner.scan();
+        scanner.scan();
 
         if (scanner.getTokenType() == TokenType.AttributeValue) {
           attributeValue = scanner.getTokenText().replace(/['"]/g, '');
@@ -215,7 +263,7 @@ export function doCompleteScanOfSymbol(
       completeScanOfAttributeValues.push(scanOfAttributeValues);
     }
 
-    doScan = scanner.scan();
+    scanner.scan();
   }
 
   return completeScanOfAttributeValues;
@@ -256,6 +304,27 @@ export function getContentOfTemplate(template: vscode.SymbolInformation, documen
   return content;
 }
 
+export function scanTemplate(template: vscode.SymbolInformation, document: vscode.TextDocument) {
+  const scanner = htmlLangService.createScanner(document.getText(_createRange(template.location.range)));
+  let doScan: number = scanner.scan();
+  let content = '';
+
+  while (
+    doScan != TokenType.EOS &&
+    doScan != TokenType.EndTag &&
+    doScan != TokenType.EndTagClose &&
+    doScan != TokenType.Unknown
+  ) {
+    if (doScan == TokenType.Script) {
+      console.log(scanner.getTokenEnd());
+    }
+
+    doScan = scanner.scan();
+  }
+
+  return content;
+}
+
 function _transformTextDocumentApi(document: vscode.TextDocument) {
   // Necessary because the API is incompatible between htmlLanguage service and new vs code versions
   let transform: any = {};
@@ -269,9 +338,10 @@ function _getCurrentSymbol(
   symbols: vscode.SymbolInformation[],
   position: vscode.Position
 ): vscode.SymbolInformation | undefined {
-  return _.findLast(symbols, (symbol: vscode.SymbolInformation) => {
+  const standardSymbols = _.findLast(symbols, (symbol: vscode.SymbolInformation) => {
     return new vscode.Range(symbol.location.range.start, symbol.location.range.end).contains(position);
   });
+  return standardSymbols;
 }
 
 function _createRange(oldRangeObject: vscode.Range) {
@@ -298,4 +368,19 @@ function _getScanOfActiveAttributeValue(
   position: vscode.Position
 ): IScanOfAttributeValue | undefined {
   return _.find(doCompleteScanOfCurrentSymbol(document, position), scan => scan.activeUnderCursor);
+}
+
+async function _transformDocAndPositionForResultTemplate(
+  resultTemplate: vscode.SymbolInformation,
+  document: vscode.TextDocument,
+  position: vscode.Position
+) {
+  const newDocument = await vscode.workspace.openTextDocument({
+    content: getContentOfTemplate(resultTemplate, document)
+  });
+  const newPosition = position.translate(-resultTemplate.location.range.start.line);
+  return {
+    newDocument,
+    newPosition
+  };
 }
